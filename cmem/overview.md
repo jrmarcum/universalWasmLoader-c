@@ -64,6 +64,13 @@ No test harness yet. (When one is added, record the real command here and in `IN
 
 ## Build / release flow
 
-Not yet established. Expected shape: a single-header include consumed directly by C/Zig/V/Julia
-projects, linked against the wasmtime C API. No build system, packaging, or release tooling exists in
-the repo at this time.
+No build system, packaging, or release tooling exists in the repo yet. Expected shape: a single-header
+include consumed directly by C/C++/V/Julia projects, linked against the wasmtime C API.
+
+**Distribution target — vcpkg (decided by owner 2026-06-15):** C/C++ packages publish on
+[vcpkg.io](https://vcpkg.io/en/). When this port is built out, ship a vcpkg **port**
+(`portfile.cmake` + `vcpkg.json`, with the version in `vcpkg.json`), submitted to the vcpkg registry
+(PR to `microsoft/vcpkg`) or served from a custom registry; the portfile fetches the repo at a tagged
+ref. (Zig consumers now have their own separate track — Zig packages publish on
+[zigistry.dev](https://zigistry.dev/) via `build.zig.zon` — so a future Zig port would be its own repo,
+not this header-only C one.) See the ecosystem publishing matrix in the wasmtk `cmem/vision.md`.

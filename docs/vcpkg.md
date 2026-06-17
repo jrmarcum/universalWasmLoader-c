@@ -120,20 +120,25 @@ cmake --build build
 
 ## 4. Maintaining the registry
 
-After editing the port (or bumping versions):
+After editing the port, the `git-tree` recorded in
+`versions/u-/universal-wasm-loader-c.json` must be updated to the new port tree,
+or registry installs fail the git-tree check.
+
+`vcpkg x-add-version` is the usual tool, but it expects a full vcpkg-root layout
+(`scripts/vcpkg-tools.json`) that this minimal registry doesn't have, so we
+maintain it by hand — the value is just `git rev-parse HEAD:ports/<port>`:
 
 ```sh
-git add ports/universal-wasm-loader-c
-git commit -m "port: <change>"
-"$VCPKG_ROOT/vcpkg" x-add-version universal-wasm-loader-c \
-  --vcpkg-root "$PWD" --verbose      # add --overwrite-version when re-publishing the same version
-git add versions && git commit -m "version: universal-wasm-loader-c"
+git add ports/universal-wasm-loader-c && git commit -m "port: <change>"
+TREE=$(git rev-parse HEAD:ports/universal-wasm-loader-c)
+# set versions/u-/universal-wasm-loader-c.json "git-tree" to $TREE
+# (bump "version" + "baseline" too when releasing a new version)
+git add versions && git commit -m "registry: bump git-tree"
 ```
 
-`vcpkg x-add-version` records the port's git-tree under `versions/` and updates
-`versions/baseline.json`. (The committed `versions/` files in this repo were
-authored to match the initial `1.0.0` port tree; if you change the port without
-re-running this, registry installs will fail the git-tree check.)
+The consumer's `vcpkg-configuration.json` baseline (§2a) must point at a commit
+where `versions/` already reflects the port you want — i.e. run `git rev-parse
+HEAD` *after* committing the `versions/` update.
 
 ## Troubleshooting
 

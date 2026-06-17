@@ -24,7 +24,7 @@ When the owner says **"look for code issues"** (or "code audit" / "audit the cod
 comprehensive audit across tested AND untested paths for: (1) workarounds / temporary hacks;
 (2) dead code; (3) bugs (wrong ABI marshalling, off-by-one pointer/length math, endianness, missing
 `cabi_post` calls); and (4) silent fall-throughs (returning a default instead of erroring). Report
-`file:line` + severity, fix the safe ones, and keep the test suite green ((no test harness yet)).
+`file:line` + severity, fix the safe ones, and keep the test suite green (`make test` → 29/29).
 
 ## Files
 

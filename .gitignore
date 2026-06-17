@@ -55,3 +55,6 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Vendored wasmtime C API (fetched by scripts/fetch-wasmtime.sh)
+vendor/

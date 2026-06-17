@@ -5,72 +5,103 @@
 `universalWasmLoader-c` is the **C / header-only** port of the Universal WASM Loader family. It is
 the cross-language sibling of the reference TypeScript/JavaScript loader (`universalWasmLoader`) and
 the Rust/Python ports. Its job is to let C — and, via the C ABI, **Zig / V / Julia** consumers —
-load and call `.wasm` component modules (produced by `wasmtk`, e.g. from TypeScript via `wasic`)
-with Canonical-ABI marshalling handled for them, the same way the JS loader does in its ecosystem.
+load and call `.wasm` reactor/library modules (produced by `wasmtk`, e.g. from TypeScript via
+`wasic`/`modc`) with Canonical-ABI marshalling handled for them, the same way the JS loader does in
+its ecosystem.
 
-- **Language / runtime:** C, built on the **wasmtime C API** (`wasm.h` / `wasmtime.h`) as the
-  underlying WASM engine.
+- **Language / runtime:** C (C11), built on the **wasmtime C API** (`wasm.h` / `wasmtime.h` /
+  `wasi.h`) as the underlying WASM engine.
 - **Intended consumers:** C, C++, **Zig, V, Julia** (any language that can call a C header / link a
   C library). The header-only form is specifically aimed at those header-friendly consumers.
-- **Distribution:** **header-only** (single-header `#include`, plus linking against the wasmtime C
-  API library). No separate compiled artifact is intended to be required by consumers.
+- **Distribution:** **header-only** — a single STB-style header, `universal_wasm_loader.h`. Declarations
+  are always visible; the implementation is compiled into exactly one TU that does
+  `#define UWL_IMPLEMENTATION` before including. Consumers link against the wasmtime C API library.
 
-## Current state — EARLY STUB (as of 2026-06-15)
+## Current state — IMPLEMENTED v1 (2026-06-17)
 
-This repo is a **stub**, not an implementation. The working tree contains only:
+The header-only loader is implemented and passes the full reference suite. Working tree:
 
-- `README.md` — one-line description ("Universal wasm loader for C/C++/Zig/V").
-- `LICENSE`
-- `.gitignore` — standard C/C++ build-artifact ignores.
-- `CLAUDE.md` — project goal + explicit note that "No source tree exists yet."
+- `universal_wasm_loader.h` — the single-header library (public API + `UWL_IMPLEMENTATION` body).
+- `tests/spec_tests.c` — the SPEC §8 reference suite (29 assertions).
+- `tests/*.wasm` + `tests/*.wit` — the four reference fixtures (`math_50`, `booleans_50`,
+  `strings_50`, `imports_50`), copied verbatim from the `-rs` port (unmodified per §7-#7).
+- `Makefile` — `make fetch` (download the wasmtime C API SDK into `vendor/`), `make test` (build +
+  run), `make clean`. Override `WASMTIME_VERSION` / `WASMTIME_PLATFORM` / `WASMTIME_LINK`.
+- `scripts/fetch-wasmtime.sh` — fetches + unzips the wasmtime C API release artifact into `vendor/`.
+- `vendor/` — the wasmtime C API SDK (headers + `libwasmtime.a` / import lib). **gitignored**;
+  fetched on demand, not committed.
 
-There is **no source code** yet: no `.h` / `.c` files, no build system (no `Makefile` / `CMakeLists.txt`),
-no examples, and **no test harness**. The git history is three commits: `14f0c5e Initial commit`,
-`5f0dfd8 update docs`, `91a8a27 update docs`.
+Build environment used for v1: MinGW-w64 gcc + wasmtime C API **v45.0.2** `x86_64-mingw`, static link.
 
-## Public API surface
+## Public API surface (implemented)
 
-**None implemented yet.** The intended (not-yet-written) surface is the idiomatic C equivalent of the
-reference loader's API:
+Idiomatic C equivalents of the reference loader's API. All in `universal_wasm_loader.h`.
 
-- `wasmImport(...)` → singleton/DLL-pattern load + call (cache one instance after first load).
-- `createSingleton(...)` → explicit single-instance handle.
-- `InstancePool` → pool of fresh instances for server/loop use (the bump allocator in wasic-produced
-  modules has no `free`, so pooling is how long-running hosts avoid heap exhaustion — see the
-  reference loader's `acquire` / `release` / `run` / `destroy` API).
+- **`uwl_val_t`** — tagged-union value (`UWL_VOID/I32/I64/F32/F64/BOOL/STR`) with constructors
+  (`uwl_i32`, `uwl_f64`, `uwl_bool`, `uwl_str`, `uwl_strn`, …) and accessors (`uwl_as_i32`,
+  `uwl_as_str`, …). Owned string values/results are freed with `uwl_val_free`.
+- **`uwl_import(path, callbacks, ncallbacks, &err)`** → `uwl_module_t*` — the core entry point
+  (the synchronous C analog of `wasmImport`; C has no promises). Reads the `.wasm`, auto-detects the
+  companion `.wit`, applies the Canonical ABI, instantiates, calls `_initialize` if present, and
+  enforces `@N` version pinning. On failure returns `NULL` with a heap `*err` (free with
+  `uwl_string_free`).
+- **`uwl_call(m, name, args, nargs, &out, &err)`** → 0/-1 — invoke an export by its camelCase WIT
+  name (or raw WASM name when no `.wit`).
+- **`uwl_free(m)`**.
+- **Singleton (DLL pattern):** `uwl_singleton_new` / `uwl_singleton_get` (loads once, caches) /
+  `uwl_singleton_free`.
+- **`InstancePool` (server/loop pattern):** `uwl_pool_new(size)` / `uwl_pool_acquire` /
+  `uwl_pool_release` / `uwl_pool_size` / `uwl_pool_available` / `uwl_pool_free`. The C pool is **not
+  internally synchronized** (single-threaded model; caller guards concurrency) — documented in the
+  header; sufficient for the SPEC scenario (size=2, two acquires distinct, release restores).
 
-When implementing, mirror the reference loader's names/semantics so this port conforms to the
-cross-language `SPEC.md`. None of these exist in C here today.
+### Host import callbacks
 
-## Canonical ABI / SPEC conformance status
+`uwl_host_callback_t { const char *name; uwl_host_fn_t fn; void *userdata; }` keyed by camelCase WIT
+import name (e.g. `"envMul"`). Imports are defined into a `wasmtime_linker_t` under the `env`
+namespace using the underscore form of the WIT name (`env-mul` → `env_mul`). A single trampoline
+(`uwl__import_trampoline`) decodes args (strings read from caller memory via
+`wasmtime_caller_export_get("memory")`), calls the user fn, and encodes the result. Remaining
+unsatisfied imports are bound to traps (`wasmtime_linker_define_unknown_imports_as_traps`) so
+pure-compute modules and partial-import modules still instantiate.
 
-- **Cross-language `SPEC.md` is at v3.0.0 (2026-06-15) — a BREAKING change.** In v3.0.0, string and
-  aggregate **RETURNS** moved from the OLD caller-allocated out-parameter convention to the
-  **canonical callee-allocated convention**: the export returns an **i32 pointer** to a
-  callee-allocated `[ptr, len]` pair; the host reads `ptr`/`len` from that pair (e.g. via the
-  module's memory) and then MUST call the paired **`cabi_post_<name>(retPtr)`** export to release the
-  callee-side allocation.
-- **This port's string-return handling: NONE (no source exists).** There is no out-param code, no
-  `cabi_post` call, no string marshalling of any kind — nothing to align. A future session bringing
-  this port up to SPEC 3.0.0 is therefore implementing string returns **fresh against the NEW
-  callee-allocated + `cabi_post_<name>` convention from the start** (do not implement the deprecated
-  out-param form). String PARAMS still use `cabi_realloc` to allocate + copy bytes into module memory,
-  same as the reference loader.
+## Canonical ABI / SPEC conformance status — CONFORMANT to SPEC 3.0.0
+
+- **String PARAMS:** `cabi_realloc(0,0,1,len)` → write UTF-8 bytes into linear memory → pass
+  `(ptr,len)` as two i32 args. (Implemented fresh; no deprecated form.)
+- **String RETURNS (callee-allocated, the v3.0.0 breaking change):** the export returns an **i32
+  pointer** to a callee-allocated `[ptr,len]` pair; the loader reads both little-endian i32s from
+  memory, decodes (copies) the bytes, then calls the paired **`cabi_post_<camelName>(retArea)`**
+  export to release the buffer (no-op under wasic's bump allocator, but the contract is honored).
+- **Numerics/bool:** direct; bool encoded `?1:0`, decoded `!=0`.
+- **§10 reactor + WASI:** calls `_initialize` once after instantiation if present; configures a
+  wasmtime WASI context (`wasmtime_context_set_wasi`, stdout/stderr inherited) and
+  `wasmtime_linker_define_wasi` so I/O-using libraries instantiate. Pure-compute modules ignore it.
 
 ## Tests
 
-No test harness yet. (When one is added, record the real command here and in `INDEX.md`, replacing the
-`(no test harness yet)` placeholder.)
+`make test` → builds `tests/spec_tests.c` and runs it: **29 passed, 0 failed.** Covers all four
+fixtures plus singleton, pool, and version-pin-rejected scenarios. The fixtures are byte-identical to
+the `-rs`/`-js` ones (SPEC §7-#7).
 
 ## Build / release flow
 
-No build system, packaging, or release tooling exists in the repo yet. Expected shape: a single-header
-include consumed directly by C/C++/V/Julia projects, linked against the wasmtime C API.
+- **Local:** `make fetch` then `make test` (needs `curl`, `unzip`, a C compiler, `make`).
+- **Toolchain note (MinGW static link):** `wasi.h` decorates every `_WIN32` symbol
+  `__declspec(dllimport)` unless `WASI_API_EXTERN` is pre-defined (unlike `wasm.h`, which already
+  exempts MinGW). The header pre-defines `WASI_API_EXTERN` to plain `extern` for `__MINGW32__` /
+  `LIBWASM_STATIC` builds so the `wasi_config_*` symbols resolve against `libwasmtime.a`. Without it,
+  static MinGW links fail with `undefined reference to __imp_wasi_config_*`.
+- **Distribution target — vcpkg (owner decision 2026-06-15):** ship a vcpkg **port**
+  (`portfile.cmake` + `vcpkg.json`) fetching the repo at a tagged ref. (Zig consumers publish
+  separately on zigistry.dev.) Not yet wired. See the ecosystem publishing matrix in wasmtk
+  `cmem/vision.md`.
 
-**Distribution target — vcpkg (decided by owner 2026-06-15):** C/C++ packages publish on
-[vcpkg.io](https://vcpkg.io/en/). When this port is built out, ship a vcpkg **port**
-(`portfile.cmake` + `vcpkg.json`, with the version in `vcpkg.json`), submitted to the vcpkg registry
-(PR to `microsoft/vcpkg`) or served from a custom registry; the portfile fetches the repo at a tagged
-ref. (Zig consumers now have their own separate track — Zig packages publish on
-[zigistry.dev](https://zigistry.dev/) via `build.zig.zon` — so a future Zig port would be its own repo,
-not this header-only C one.) See the ecosystem publishing matrix in the wasmtk `cmem/vision.md`.
+## Known gaps / not yet done
+
+- **Host import callbacks returning `string`** are not supported (would require allocating into WASM
+  memory from the trampoline; no fixture needs it). Numeric/bool import returns work.
+- **URL loading** (the JS/`-rs` `http(s)://` path) is not implemented — file paths only.
+- **Thread-safe pool** (blocking acquire) — the C pool is single-threaded; a future revision could
+  add mutex/condvar gating behind a compile flag.
+- **Packaging** (vcpkg port, CI) not yet created.

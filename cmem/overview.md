@@ -92,10 +92,19 @@ the `-rs`/`-js` ones (SPEC §7-#7).
   exempts MinGW). The header pre-defines `WASI_API_EXTERN` to plain `extern` for `__MINGW32__` /
   `LIBWASM_STATIC` builds so the `wasi_config_*` symbols resolve against `libwasmtime.a`. Without it,
   static MinGW links fail with `undefined reference to __imp_wasi_config_*`.
-- **Distribution target — vcpkg (owner decision 2026-06-15):** ship a vcpkg **port**
-  (`portfile.cmake` + `vcpkg.json`) fetching the repo at a tagged ref. (Zig consumers publish
-  separately on zigistry.dev.) Not yet wired. See the ecosystem publishing matrix in wasmtk
-  `cmem/vision.md`.
+- **Distribution — vcpkg (owner decision 2026-06-15), AUTHORED 2026-06-17:** the repo doubles as a
+  vcpkg **git registry**. `ports/universal-wasm-loader-c/` holds `vcpkg.json` (v1.0.0, MIT) +
+  `portfile.cmake` + `universal-wasm-loader-c-config.cmake.in` + `usage`. The portfile downloads the
+  loader header (raw github at tag `v<version>`, pinned by sha512) AND the matching **wasmtime C API
+  artifact per triplet** (no `wasmtime` port exists in vcpkg — it's prebuilt GitHub releases), installs
+  both headers + the wasmtime lib (release+debug copies), and emits a CMake config exposing INTERFACE
+  target `unofficial::universal-wasm-loader-c` wired with the wasmtime lib + platform syslibs.
+  Supported triplets: x64-windows(+static), x64-mingw-(dynamic|static), x64/arm64-linux, x64/arm64-osx
+  (real sha512 captured for each wasmtime artifact, v45.0.2). Consumer example in
+  `examples/cmake-consumer/`; setup guide in `docs/vcpkg.md`. **Not yet validated with a real
+  `vcpkg install`** (vcpkg wasn't available on the authoring machine) and **requires pushing + tagging
+  `v1.0.0`** so the raw-github header/LICENSE downloads resolve. `versions/` registry files authored
+  to the initial 1.0.0 port tree. See the ecosystem publishing matrix in wasmtk `cmem/vision.md`.
 
 ## Known gaps / not yet done
 
@@ -104,4 +113,4 @@ the `-rs`/`-js` ones (SPEC §7-#7).
 - **URL loading** (the JS/`-rs` `http(s)://` path) is not implemented — file paths only.
 - **Thread-safe pool** (blocking acquire) — the C pool is single-threaded; a future revision could
   add mutex/condvar gating behind a compile flag.
-- **Packaging** (vcpkg port, CI) not yet created.
+- **vcpkg port** authored but **not yet validated** with a real `vcpkg install`, and CI not set up.

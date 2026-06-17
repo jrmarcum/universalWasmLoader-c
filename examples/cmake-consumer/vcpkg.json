@@ -1,0 +1,7 @@
+{
+  "name": "uwl-consumer",
+  "version": "0.1.0",
+  "dependencies": [
+    "universal-wasm-loader-c"
+  ]
+}

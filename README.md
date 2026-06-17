@@ -123,6 +123,21 @@ string values you build (`uwl_str`/`uwl_strn`) and string results written to `ou
 free them with `uwl_val_free`. Error strings from the `err` out-parameter are freed with
 `uwl_string_free`.
 
+## Install via vcpkg
+
+This repo is a vcpkg registry. With vcpkg configured (see
+[`docs/vcpkg.md`](docs/vcpkg.md)):
+
+```cmake
+find_package(universal-wasm-loader-c CONFIG REQUIRED)
+target_link_libraries(main PRIVATE unofficial::universal-wasm-loader-c)
+```
+
+The port downloads the matching wasmtime C API SDK for your triplet and wires
+the include path, the wasmtime library, and the platform system libraries into
+that one target. See [`docs/vcpkg.md`](docs/vcpkg.md) for registry setup and the
+quick overlay-port path.
+
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

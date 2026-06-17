@@ -1,0 +1,25 @@
+# CMake package config for universal-wasm-loader-c (vcpkg).
+# Exposes the header-only loader as an INTERFACE target that also carries the
+# wasmtime C API library and the platform system libraries it needs.
+
+get_filename_component(_uwl_prefix "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+
+find_library(UWL_WASMTIME_LIBRARY
+  NAMES wasmtime libwasmtime
+  PATHS "${_uwl_prefix}/lib" "${_uwl_prefix}/debug/lib"
+  NO_DEFAULT_PATH)
+
+if(NOT UWL_WASMTIME_LIBRARY)
+  set(universal-wasm-loader-c_FOUND FALSE)
+  set(universal-wasm-loader-c_NOT_FOUND_MESSAGE
+      "wasmtime library not found under ${_uwl_prefix}")
+  return()
+endif()
+
+if(NOT TARGET unofficial::universal-wasm-loader-c)
+  add_library(unofficial::universal-wasm-loader-c INTERFACE IMPORTED)
+  set_target_properties(unofficial::universal-wasm-loader-c PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_uwl_prefix}/include")
+  set_property(TARGET unofficial::universal-wasm-loader-c APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES "${UWL_WASMTIME_LIBRARY};@UWL_SYSLIBS_CMAKE@")
+endif()

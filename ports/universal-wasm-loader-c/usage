@@ -1,0 +1,14 @@
+universal-wasm-loader-c provides a single header and the wasmtime C API.
+
+In exactly one translation unit, define UWL_IMPLEMENTATION before including:
+
+    #define UWL_IMPLEMENTATION
+    #include <universal_wasm_loader.h>
+
+From CMake:
+
+    find_package(universal-wasm-loader-c CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE unofficial::universal-wasm-loader-c)
+
+The target carries the include directory, the wasmtime library, and the
+platform system libraries; no further linkage is required.

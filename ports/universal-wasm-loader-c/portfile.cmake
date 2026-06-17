@@ -20,10 +20,12 @@ set(WASMTIME_BASE "https://github.com/bytecodealliance/wasmtime/releases/downloa
 
 # ── select the wasmtime C API artifact for this triplet ──────────────────────
 if(VCPKG_TARGET_IS_WINDOWS AND NOT VCPKG_TARGET_IS_MINGW)
-  set(_wt_triple "x86_64-windows") ; set(_wt_ext "zip")
+  set(_wt_triple "x86_64-windows")
+  set(_wt_ext "zip")
   set(_wt_sha "0deff10840195f1fc38c0cbf24f36461eff8984069ea4e7c3e05b666d8fdbf86672b18254ea1959e512784b81f57e4008eaeba0dae29d2913a208e21f55f2e7e")
 elseif(VCPKG_TARGET_IS_MINGW)
-  set(_wt_triple "x86_64-mingw") ; set(_wt_ext "zip")
+  set(_wt_triple "x86_64-mingw")
+  set(_wt_ext "zip")
   set(_wt_sha "a298e7dc562cdc6ab149934823f2cf7b465e604a1f8c2d8cbfaa396c16cd6b3f60eac6d51c571829a93c7c58fe6cf9caf259db2be8ec53d0634f6685f7473d20")
 elseif(VCPKG_TARGET_IS_LINUX)
   if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")

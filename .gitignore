@@ -58,3 +58,8 @@ dkms.conf
 
 # Vendored wasmtime C API (fetched by scripts/fetch-wasmtime.sh)
 vendor/
+
+# CMake build dirs (examples)
+build/
+CMakeCache.txt
+CMakeFiles/

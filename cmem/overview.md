@@ -101,10 +101,16 @@ the `-rs`/`-js` ones (SPEC §7-#7).
   target `unofficial::universal-wasm-loader-c` wired with the wasmtime lib + platform syslibs.
   Supported triplets: x64-windows(+static), x64-mingw-(dynamic|static), x64/arm64-linux, x64/arm64-osx
   (real sha512 captured for each wasmtime artifact, v45.0.2). Consumer example in
-  `examples/cmake-consumer/`; setup guide in `docs/vcpkg.md`. **Not yet validated with a real
-  `vcpkg install`** (vcpkg wasn't available on the authoring machine) and **requires pushing + tagging
-  `v1.0.0`** so the raw-github header/LICENSE downloads resolve. `versions/` registry files authored
-  to the initial 1.0.0 port tree. See the ecosystem publishing matrix in wasmtk `cmem/vision.md`.
+  `examples/cmake-consumer/`; setup guide in `docs/vcpkg.md`. **VALIDATED 2026-06-17** end-to-end on
+  `x64-mingw-dynamic`: `vcpkg install` (overlay port; `downloads/` pre-seeded with the exact header /
+  LICENSE / wasmtime files so it validates offline before the tag exists) passed post-build validation
+  (MIT detected); the consumer example built via `find_package` + `unofficial::universal-wasm-loader-c`
+  and ran `add(3,4)=7`. Two portfile bugs fixed during validation: (1) `;`-separated commands on one
+  line are a CMake parse error → split to separate lines; (2) dropped the unused `vcpkg-cmake-config`
+  host dep (config is hand-written via `configure_file`), which had forced an MSVC host build. **Real
+  (non-seeded) installs still require pushing + tagging `v1.0.0`** so the raw-github header/LICENSE
+  downloads resolve. `versions/` regenerated to the validated port tree via `vcpkg x-add-version`. See
+  the ecosystem publishing matrix in wasmtk `cmem/vision.md`.
 
 ## Known gaps / not yet done
 
@@ -113,4 +119,5 @@ the `-rs`/`-js` ones (SPEC §7-#7).
 - **URL loading** (the JS/`-rs` `http(s)://` path) is not implemented — file paths only.
 - **Thread-safe pool** (blocking acquire) — the C pool is single-threaded; a future revision could
   add mutex/condvar gating behind a compile flag.
-- **vcpkg port** authored but **not yet validated** with a real `vcpkg install`, and CI not set up.
+- **vcpkg port** validated on `x64-mingw-dynamic` (2026-06-17); the other triplets (MSVC x64-windows,
+  linux, macos) are authored with real sha512 but not yet build-tested. CI not set up.

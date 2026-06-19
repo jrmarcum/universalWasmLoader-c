@@ -46,7 +46,19 @@ Idiomatic C equivalents of the reference loader's API. All in `universal_wasm_lo
   enforces `@N` version pinning. On failure returns `NULL` with a heap `*err` (free with
   `uwl_string_free`).
 - **`uwl_call(m, name, args, nargs, &out, &err)`** → 0/-1 — invoke an export by its camelCase WIT
-  name (or raw WASM name when no `.wit`).
+  name (or raw WASM name when no `.wit`). The low-level call: explicit `uwl_val_t` args + out-param;
+  the escape hatch for raw (no-`.wit`) modules and callers wanting per-call `err`.
+- **Convenience call layer (added 2026-06-19)** — typed variadic wrappers
+  `uwl_call_i32/_i64/_f32/_f64/_bool/_str/_void(m, name, ...)` that read **native C args** per the
+  export's parsed WIT signature (varargs decoded by `uwl_wt_t`: STR→`const char*`, BOOL→`int`,
+  F32→`double`→`float`, F64→`double`, S64→`int64_t`, S32→`int32_t`) and return a native C value — the
+  C analog of the JS loader's `m.add(3,4)`. `uwl_call_str` returns an owned heap string (free with
+  `uwl_string_free`). Errors are NOT out-params: on failure they return `0`/`NULL` and set a
+  **thread-local** last-error read via **`uwl_last_error()`** (loader-owned, cleared on next success;
+  TLS via `__thread`/`__declspec(thread)`). **Require a companion `.wit`** (source of the per-arg
+  types) — no-`.wit` modules must use `uwl_call`. Implemented as thin wrappers over `uwl_call` (shared
+  core `uwl__call_va`); the reference suite (`spec_tests.c`) was rewritten onto them, replacing the
+  hand-rolled `call_i32/f64/bool/str_eq` helpers — still **29/29**.
 - **`uwl_free(m)`**.
 - **Singleton (DLL pattern):** `uwl_singleton_new` / `uwl_singleton_get` (loads once, caches) /
   `uwl_singleton_free`.

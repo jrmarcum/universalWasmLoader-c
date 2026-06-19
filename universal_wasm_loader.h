@@ -179,6 +179,46 @@ int uwl_call(uwl_module_t *m, const char *name,
 /** Free a module and all resources it owns. */
 void uwl_free(uwl_module_t *m);
 
+/* ── Convenience call layer ─────────────────────────────────────────────────
+ *
+ * Typed, variadic wrappers over #uwl_call that read native C arguments and
+ * return a native C result — the idiomatic one-liner form:
+ *
+ *   int    r = uwl_call_i32(m, "add", 3, 4);          // 7
+ *   double s = uwl_call_f64(m, "scale", 3.0, 4.0);    // 12.0
+ *   char  *g = uwl_call_str(m, "greet", "World");     // "Hello, World!"
+ *   uwl_string_free(g);
+ *
+ * Each argument is read with the correct type from the export's parsed WIT
+ * signature, so pass plain C values (int / int64_t / double / const char*).
+ * Booleans are passed as `int`; `f32` params/args use C `double`/`float`.
+ *
+ * These REQUIRE a companion `.wit` (that is where the per-argument types come
+ * from). For raw modules loaded without a `.wit`, use #uwl_call with explicit
+ * #uwl_val_t values.
+ *
+ * Errors do not use an out-parameter: on failure the call returns the sentinel
+ * (0 / NULL) and sets the thread-local last error, retrievable with
+ * #uwl_last_error. A successful call clears it. The result-type suffix must
+ * match the export's WIT result type.
+ */
+int32_t uwl_call_i32 (uwl_module_t *m, const char *name, ...);
+int64_t uwl_call_i64 (uwl_module_t *m, const char *name, ...);
+float   uwl_call_f32 (uwl_module_t *m, const char *name, ...);
+double  uwl_call_f64 (uwl_module_t *m, const char *name, ...);
+int     uwl_call_bool(uwl_module_t *m, const char *name, ...);
+void    uwl_call_void(uwl_module_t *m, const char *name, ...);
+/** Like the others, but returns an owned heap string (free with
+ *  #uwl_string_free), or NULL on failure / non-string result. */
+char   *uwl_call_str (uwl_module_t *m, const char *name, ...);
+
+/**
+ * The last error from a convenience call (#uwl_call_i32 etc.) on the current
+ * thread, or NULL if the last such call succeeded. Owned by the loader — do
+ * not free; valid until this thread's next convenience call.
+ */
+const char *uwl_last_error(void);
+
 /* ── Singleton (DLL pattern) ────────────────────────────────────────────── */
 
 /** Lazily-loaded, cached single instance. See #uwl_singleton_get. */
@@ -1056,6 +1096,137 @@ void uwl_val_free(uwl_val_t *v) {
 }
 
 void uwl_string_free(char *s) { free(s); }
+
+/* ── convenience call layer ─────────────────────────────────────────────────
+ * Typed variadic wrappers over uwl_call. The export's WIT signature drives how
+ * each vararg is read, so callers pass native C values. Errors land in a
+ * thread-local last-error string instead of an out-parameter. */
+
+#if defined(_MSC_VER)
+#  define UWL_THREAD_LOCAL __declspec(thread)
+#elif defined(__GNUC__)
+#  define UWL_THREAD_LOCAL __thread
+#else
+#  define UWL_THREAD_LOCAL
+#endif
+
+static UWL_THREAD_LOCAL char *uwl__tls_err = NULL;
+
+/* Replace the thread-local error, taking ownership of `msg` (may be NULL). */
+static void uwl__tls_set(char *msg) {
+    if (uwl__tls_err) free(uwl__tls_err);
+    uwl__tls_err = msg;
+}
+
+const char *uwl_last_error(void) { return uwl__tls_err; }
+
+/* Shared core: read varargs per the export's WIT params, call uwl_call, and
+ * route the error to the thread-local. Returns 0 on success, -1 on failure
+ * (with *out set to void). */
+static int uwl__call_va(uwl_module_t *m, const char *name, uwl_val_t *out, va_list ap) {
+    *out = uwl_void();
+    if (!m) { uwl__tls_set(uwl__strdup("null module")); return -1; }
+    if (!m->has_wit) {
+        uwl__tls_set(uwl__strdup("convenience calls require a companion .wit; use uwl_call for raw modules"));
+        return -1;
+    }
+    uwl_witfunc_t *f = NULL;
+    for (size_t i = 0; i < m->wit.nexports; i++)
+        if (!strcmp(m->wit.exports[i].camel, name)) { f = &m->wit.exports[i]; break; }
+    if (!f) {
+        char *e = NULL; uwl__set_err(&e, "no export '%s' in WIT", name);
+        uwl__tls_set(e); return -1;
+    }
+
+    uwl_val_t *args = f->nparams ? (uwl_val_t *)malloc(f->nparams * sizeof(uwl_val_t)) : NULL;
+    if (f->nparams && !args) { uwl__tls_set(uwl__strdup("out of memory")); return -1; }
+    for (size_t i = 0; i < f->nparams; i++) {
+        switch (f->params[i]) {
+            case UWL_WT_STR:  args[i] = uwl_str(va_arg(ap, const char *)); break;
+            case UWL_WT_BOOL: args[i] = uwl_bool(va_arg(ap, int)); break;
+            case UWL_WT_S64:  args[i] = uwl_i64(va_arg(ap, int64_t)); break;
+            case UWL_WT_F32:  args[i] = uwl_f32((float)va_arg(ap, double)); break;
+            case UWL_WT_F64:  args[i] = uwl_f64(va_arg(ap, double)); break;
+            default:          args[i] = uwl_i32(va_arg(ap, int32_t)); break; /* s32 */
+        }
+    }
+
+    char *err = NULL;
+    int rc = uwl_call(m, name, args, f->nparams, out, &err);
+
+    for (size_t i = 0; i < f->nparams; i++)
+        if (args[i].kind == UWL_STR) uwl_val_free(&args[i]);
+    free(args);
+
+    uwl__tls_set(err); /* NULL on success clears the last error */
+    return rc;
+}
+
+int32_t uwl_call_i32(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    int32_t r = (rc == 0) ? uwl_as_i32(out) : 0;
+    uwl_val_free(&out);
+    return r;
+}
+
+int64_t uwl_call_i64(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    int64_t r = (rc == 0) ? uwl_as_i64(out) : 0;
+    uwl_val_free(&out);
+    return r;
+}
+
+float uwl_call_f32(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    float r = (rc == 0) ? uwl_as_f32(out) : 0.0f;
+    uwl_val_free(&out);
+    return r;
+}
+
+double uwl_call_f64(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    double r = (rc == 0) ? uwl_as_f64(out) : 0.0;
+    uwl_val_free(&out);
+    return r;
+}
+
+int uwl_call_bool(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    int r = (rc == 0) ? uwl_as_bool(out) : 0;
+    uwl_val_free(&out);
+    return r;
+}
+
+void uwl_call_void(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    uwl_val_free(&out);
+}
+
+char *uwl_call_str(uwl_module_t *m, const char *name, ...) {
+    va_list ap; va_start(ap, name);
+    uwl_val_t out; int rc = uwl__call_va(m, name, &out, ap);
+    va_end(ap);
+    if (rc != 0 || out.kind != UWL_STR) {
+        if (rc == 0) uwl__tls_set(uwl__strdup("export did not return a string"));
+        uwl_val_free(&out);
+        return NULL;
+    }
+    char *s = out.str;          /* transfer ownership to the caller */
+    out.str = NULL; out.kind = UWL_VOID;
+    return s;
+}
 
 /* ── singleton ──────────────────────────────────────────────────────────── */
 

@@ -17,15 +17,11 @@ ABI — Zig, V, and Julia.
 #include "universal_wasm_loader.h"
 
 int main(void) {
-    char *err = NULL;
-    uwl_module_t *m = uwl_import("math_50.wasm", NULL, 0, &err);
-    if (!m) { fprintf(stderr, "%s\n", err); uwl_string_free(err); return 1; }
+    uwl_module_t *m = uwl_import("math_50.wasm", NULL, 0, NULL);
+    if (!m) { fprintf(stderr, "%s\n", uwl_last_error()); return 1; }
 
-    uwl_val_t args[2] = { uwl_i32(3), uwl_i32(4) };
-    uwl_val_t out;
-    if (uwl_call(m, "add", args, 2, &out, &err) == 0)
-        printf("add(3, 4) = %d\n", uwl_as_i32(out));   // 7
-    uwl_val_free(&out);
+    int r = uwl_call_i32(m, "add", 3, 4);          // 7
+    printf("add(3, 4) = %d\n", r);
 
     uwl_free(m);
     return 0;
@@ -35,20 +31,26 @@ int main(void) {
 Every other translation unit just `#include "universal_wasm_loader.h"` (no macro). Link against the
 wasmtime C API library.
 
+The typed convenience calls (`uwl_call_i32` / `_i64` / `_f32` / `_f64` / `_bool` / `_str` / `_void`)
+read native C arguments and return a native C result — the C analog of the reference loader's
+`m.add(3, 4)`. Each argument is read with the correct type from the export's WIT signature, so you
+pass plain C values. On failure they return `0`/`NULL` and set a thread-local error you read with
+`uwl_last_error()`. They require a companion `.wit`; for raw modules use the lower-level
+`uwl_call(m, name, args, nargs, &out, &err)` with explicit `uwl_val_t` values (see
+[API reference](#api-reference)).
+
 ## Strings
 
 ```c
-uwl_val_t name = uwl_str("World");
-uwl_val_t out;
-uwl_call(m, "greet", &name, 1, &out, &err);   // greet("World")
-printf("%s\n", uwl_as_str(out));               // "Hello, World!"
-uwl_val_free(&out);                            // free the owned result
-uwl_val_free(&name);                           // free the owned argument
+char *g = uwl_call_str(m, "greet", "World");   // "Hello, World!"
+printf("%s\n", g);
+uwl_string_free(g);                            // free the owned result
 ```
 
 String parameters are UTF-8-encoded and copied into WASM memory via `cabi_realloc`. String results
 follow the SPEC v3.0.0 callee-allocated convention: the loader reads the returned `[ptr, len]` pair,
-copies the bytes out, and calls `cabi_post_<name>` to release the module's buffer.
+copies the bytes out, and calls `cabi_post_<name>` to release the module's buffer. `uwl_call_str`
+hands you an owned heap string — free it with `uwl_string_free`.
 
 ## Host imports
 
@@ -60,8 +62,13 @@ static uwl_val_t env_mul(const uwl_val_t *a, size_t n, void *ud) {
 }
 
 uwl_host_callback_t cbs[] = { { "envMul", env_mul, NULL } };
-uwl_module_t *m = uwl_import("imports.wasm", cbs, 1, &err);
+uwl_module_t *m = uwl_import("imports.wasm", cbs, 1, NULL);
+
+double s = uwl_call_f64(m, "scale", 3.0, 4.0);   // module calls back into envMul
 ```
+
+Host callbacks still receive and return `uwl_val_t` (the callee side inspects arguments
+dynamically); only the export-call side gains the typed convenience wrappers.
 
 ## Version pinning
 
@@ -69,7 +76,7 @@ Append `@N` to assert the module's exported `version` i32 global equals `N` (the
 SONAME convention):
 
 ```c
-uwl_module_t *m = uwl_import("mod.wasm@2", NULL, 0, &err);  // fails unless version == 2
+uwl_module_t *m = uwl_import("mod.wasm@2", NULL, 0, NULL);  // fails unless version == 2
 ```
 
 ## Lifecycle helpers
@@ -79,6 +86,7 @@ uwl_module_t *m = uwl_import("mod.wasm@2", NULL, 0, &err);  // fails unless vers
 ```c
 uwl_singleton_t *s = uwl_singleton_new("mod.wasm", NULL, 0);
 uwl_module_t *m = uwl_singleton_get(s, &err);   // same instance every call
+int r = uwl_call_i32(m, "add", 3, 4);
 uwl_singleton_free(s);
 ```
 
@@ -118,10 +126,13 @@ Set `WASMTIME_LINK=shared` to link the import library instead of the static arch
 
 ## API reference
 
-See the doc comments in [`universal_wasm_loader.h`](universal_wasm_loader.h). Memory ownership:
-string values you build (`uwl_str`/`uwl_strn`) and string results written to `out` are heap-owned —
-free them with `uwl_val_free`. Error strings from the `err` out-parameter are freed with
-`uwl_string_free`.
+See the doc comments in [`universal_wasm_loader.h`](universal_wasm_loader.h). The typed convenience
+calls (`uwl_call_i32` etc.) are the recommended path for `.wit`-accompanied modules; the lower-level
+`uwl_call` with explicit `uwl_val_t` values is the escape hatch for raw modules and for callers who
+want a per-call `err` out-parameter. Memory ownership: string values you build (`uwl_str`/`uwl_strn`)
+and string results written to `out` are heap-owned — free them with `uwl_val_free`; the heap string
+from `uwl_call_str` and error strings from the `err` out-parameter are freed with `uwl_string_free`.
+The string returned by `uwl_last_error()` is owned by the loader — do not free it.
 
 ## Install via vcpkg
 

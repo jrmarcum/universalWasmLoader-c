@@ -8,25 +8,20 @@
 int main(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : "math_50.wasm";
 
-    char *err = NULL;
-    uwl_module_t *m = uwl_import(path, NULL, 0, &err);
+    uwl_module_t *m = uwl_import(path, NULL, 0, NULL);
     if (!m) {
-        fprintf(stderr, "load failed: %s\n", err ? err : "(unknown)");
-        uwl_string_free(err);
+        fprintf(stderr, "load failed: %s\n", uwl_last_error());
         return 1;
     }
 
-    uwl_val_t args[2] = { uwl_i32(3), uwl_i32(4) };
-    uwl_val_t out;
-    if (uwl_call(m, "add", args, 2, &out, &err) != 0) {
-        fprintf(stderr, "call failed: %s\n", err ? err : "(unknown)");
-        uwl_string_free(err);
+    int r = uwl_call_i32(m, "add", 3, 4);
+    if (uwl_last_error()) {
+        fprintf(stderr, "call failed: %s\n", uwl_last_error());
         uwl_free(m);
         return 1;
     }
 
-    printf("add(3, 4) = %d\n", uwl_as_i32(out));
-    uwl_val_free(&out);
+    printf("add(3, 4) = %d\n", r);
     uwl_free(m);
     return 0;
 }

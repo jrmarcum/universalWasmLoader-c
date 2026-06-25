@@ -1,0 +1,91 @@
+name: vcpkg release
+
+# Validates that a registry release is internally consistent and actually
+# installable. The registry is "published" by pushing main + the v<version>
+# tag; this workflow is the gate that catches a broken release (sha512 pin
+# drift, version/tag mismatch, stale versions/ git-tree, or an install that
+# fails on some triplet).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Header sha512 pin matches the header
+        run: |
+          want=$(grep -oP 'UWL_HEADER_SHA512 "\K[^"]+' ports/universal-wasm-loader-c/portfile.cmake)
+          got=$(sha512sum universal_wasm_loader.h | awk '{print $1}')
+          echo "want=$want"; echo "got =$got"
+          [ "$want" = "$got" ] || { echo "::error::UWL_HEADER_SHA512 does not match universal_wasm_loader.h"; exit 1; }
+      - name: LICENSE sha512 pin matches LICENSE
+        run: |
+          want=$(grep -oP 'UWL_LICENSE_SHA512 "\K[^"]+' ports/universal-wasm-loader-c/portfile.cmake)
+          got=$(sha512sum LICENSE | awk '{print $1}')
+          [ "$want" = "$got" ] || { echo "::error::UWL_LICENSE_SHA512 does not match LICENSE"; exit 1; }
+      - name: portfile UWL_VERSION matches vcpkg.json version
+        run: |
+          pf=$(grep -oP 'set\(UWL_VERSION "\K[^"]+' ports/universal-wasm-loader-c/portfile.cmake)
+          mf=$(grep -oP '"version"\s*:\s*"\K[^"]+' ports/universal-wasm-loader-c/vcpkg.json)
+          [ "$pf" = "$mf" ] || { echo "::error::portfile UWL_VERSION ($pf) != vcpkg.json version ($mf)"; exit 1; }
+      - name: versions/ git-tree matches the port tree
+        run: |
+          want=$(git rev-parse HEAD:ports/universal-wasm-loader-c)
+          got=$(jq -r '.versions[0]."git-tree"' versions/u-/universal-wasm-loader-c.json)
+          [ "$want" = "$got" ] || { echo "::error::versions git-tree ($got) != HEAD port tree ($want)"; exit 1; }
+      - name: On a tag, the tag must match vcpkg.json version
+        if: github.ref_type == 'tag'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          mf=$(grep -oP '"version"\s*:\s*"\K[^"]+' ports/universal-wasm-loader-c/vcpkg.json)
+          [ "$tag" = "$mf" ] || { echo "::error::tag v$tag != vcpkg.json version $mf"; exit 1; }
+
+  install:
+    # Real overlay-port install across platforms. Runs only when the v<version>
+    # tag is guaranteed to exist (the portfile downloads the header from it).
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+          - os: macos-latest
+            triplet: arm64-osx
+          - os: windows-latest
+            triplet: x64-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap vcpkg
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
+          else
+            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh"
+          fi
+      - name: Install port (overlay)
+        run: |
+          vcpkg_bin="$RUNNER_TEMP/vcpkg/vcpkg"
+          [ "$RUNNER_OS" = "Windows" ] && vcpkg_bin="$vcpkg_bin.exe"
+          "$vcpkg_bin" install universal-wasm-loader-c \
+            --overlay-ports="$PWD/ports" --triplet "${{ matrix.triplet }}"
+      - name: Copyright bundles both licenses (MIT + Apache-2.0 WITH LLVM-exception)
+        run: |
+          cp="$RUNNER_TEMP/vcpkg/installed/${{ matrix.triplet }}/share/universal-wasm-loader-c/copyright"
+          grep -qi 'Permission is hereby granted' "$cp" || { echo "::error::MIT text missing from copyright"; exit 1; }
+          grep -qi 'Apache License' "$cp"            || { echo "::error::wasmtime Apache license missing from copyright"; exit 1; }
+          grep -qi 'LLVM Exception' "$cp"            || { echo "::error::LLVM exception missing from copyright"; exit 1; }
+          echo "copyright OK: $(wc -c < "$cp") bytes"

@@ -33,7 +33,7 @@ tag must exist on GitHub:
 
 ```sh
 git push origin main
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.1.0 && git push origin v1.1.0
 ```
 
 (If the header content changes, bump `UWL_VERSION` + `UWL_HEADER_SHA512` in
@@ -104,7 +104,7 @@ No registry/baseline needed — point vcpkg straight at this repo's `ports/`:
 export VCPKG_OVERLAY_PORTS=/path/to/universalWasmLoader-c/ports
 ```
 
-(The header/LICENSE downloads still require the `v1.0.0` tag from §0.)
+(The header/LICENSE downloads still require the matching `v<version>` tag from §0.)
 
 ## 3. Build the example
 

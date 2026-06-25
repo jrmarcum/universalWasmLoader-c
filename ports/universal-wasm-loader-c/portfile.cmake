@@ -125,10 +125,13 @@ configure_file(
 )
 
 # ── copyright + usage ────────────────────────────────────────────────────────
+# The installed package redistributes the wasmtime libraries, so the copyright
+# must carry BOTH the loader's MIT license and wasmtime's
+# Apache-2.0 WITH LLVM-exception (the SDK ships its LICENSE at the archive root).
 vcpkg_download_distfile(UWL_LICENSE
   URLS "https://raw.githubusercontent.com/jrmarcum/universalWasmLoader-c/v${UWL_VERSION}/LICENSE"
   FILENAME "universal-wasm-loader-c-LICENSE-${UWL_VERSION}"
   SHA512 "${UWL_LICENSE_SHA512}"
 )
-vcpkg_install_copyright(FILE_LIST "${UWL_LICENSE}")
+vcpkg_install_copyright(FILE_LIST "${UWL_LICENSE}" "${_wt_root}/LICENSE")
 file(INSTALL "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
